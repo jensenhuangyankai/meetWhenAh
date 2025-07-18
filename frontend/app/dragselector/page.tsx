@@ -30,18 +30,69 @@ export default function Home() {
     }
   }, []);
 
-  const submit = () => {
-    const results = {
-      web_app_number: 1,
-      event_name: data.event_name,
-      event_id: data.event_id,
-      start: data.start.toString(),
-      end: data.end.toString(),
-      hours_available: selectedElements.toJSON()
+  const submit = async () => {
+    try {
+      // First, submit to our API to save the data
+      const webappData = {
+        web_app_number: 1,
+        event_name: data.event_name,
+        event_id: data.event_id,
+        start: data.start.toString(),
+        end: data.end.toString(),
+        hours_available: selectedElements.toJSON(),
+        // Add user info if available from Telegram
+        user_name: tg?.initDataUnsafe?.user?.first_name || 'Unknown User',
+        telegram_user_id: tg?.initDataUnsafe?.user?.id?.toString()
+      }
+
+      console.log('Submitting to API:', webappData);
+
+      const response = await fetch('/api/webapp-submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(webappData),
+      });
+
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        console.log('API submission successful:', result);
+        
+        // Send simplified response to Telegram bot
+        const telegramData = {
+          success: true,
+          event_id: result.event_id,
+          user: result.user,
+          message: result.message
+        };
+        
+        console.log('Sending to Telegram:', telegramData);
+        tg.sendData(JSON.stringify(telegramData));
+        tg.close();
+      } else {
+        console.error('API submission failed:', result);
+        // Send error to Telegram
+        const errorData = {
+          success: false,
+          error: result.error || 'Failed to save availability',
+          event_id: data.event_id
+        };
+        tg.sendData(JSON.stringify(errorData));
+        tg.close();
+      }
+    } catch (error) {
+      console.error('Error submitting data:', error);
+      // Send error to Telegram
+      const errorData = {
+        success: false,
+        error: 'Network error occurred',
+        event_id: data.event_id
+      };
+      tg.sendData(JSON.stringify(errorData));
+      tg.close();
     }
-    console.log(results);
-    tg.sendData(JSON.stringify(results, null, 4));
-    tg.close()
   }
 
   const [startDate, setStartDate] = useState<Date>(new Date(data.start));
