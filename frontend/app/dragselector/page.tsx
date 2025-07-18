@@ -59,7 +59,9 @@ export default function Home() {
         body: JSON.stringify(webappData),
       });
 
+      console.log('API response status:', response.status);
       const result = await response.json();
+      console.log('API response data:', result);
       
       if (response.ok && result.success) {
         console.log('API submission successful:', result);
@@ -77,12 +79,16 @@ export default function Home() {
         tg.close();
       } else {
         console.error('API submission failed:', result);
-        // Send error to Telegram
+        console.error('Response status:', response.status);
+        // Send error to Telegram with more details
         const errorData = {
           success: false,
           error: result.error || 'Failed to save availability',
+          details: result.details || 'No additional details',
+          debug_info: result.debug_info || {},
           event_id: data.event_id
         };
+        console.log('Sending error to Telegram:', errorData);
         tg.sendData(JSON.stringify(errorData));
         tg.close();
       }

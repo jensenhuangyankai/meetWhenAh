@@ -121,6 +121,8 @@ def handle_webapp(message):
 def handle_webapp_api_response(message, response_data):
     """Handle the simplified response from the new webapp API"""
     try:
+        ic("Processing API response:", response_data)
+        
         if response_data.get("success"):
             event_id = response_data["event_id"]
             user_info = response_data["user"]
@@ -149,11 +151,21 @@ def handle_webapp_api_response(message, response_data):
                 bot.send_message(message.chat.id, "✅ Availability saved, but couldn't load event details.")
         else:
             error_msg = response_data.get("error", "Unknown error occurred")
-            bot.send_message(message.chat.id, f"❌ Error saving availability: {error_msg}")
+            details = response_data.get("details", "")
+            debug_info = response_data.get("debug_info", {})
+            
+            full_error_msg = f"❌ Error saving availability: {error_msg}"
+            if details:
+                full_error_msg += f"\n\nDetails: {details}"
+            if debug_info:
+                full_error_msg += f"\n\nDebug info: {debug_info}"
+                
+            ic("Error response data:", response_data)
+            bot.send_message(message.chat.id, full_error_msg)
             
     except Exception as e:
         ic(f"Error handling webapp API response: {e}")
-        bot.send_message(message.chat.id, "❌ Error processing your submission. Please try again.")
+        bot.send_message(message.chat.id, f"❌ Error processing your submission: {str(e)}")
 
 
 @bot.inline_handler(lambda query: len(query.query) > 0)

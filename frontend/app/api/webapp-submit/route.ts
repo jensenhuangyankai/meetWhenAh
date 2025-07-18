@@ -123,15 +123,27 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    console.log('About to save availability for user:', actualUserId, 'event:', event_id)
+    console.log('Available slots to save:', availableSlots)
+
     // Check if availability already exists for this user and event
-    const { data: existingAvailability } = await supabaseAdmin
+    const { data: existingAvailability, error: checkError } = await supabaseAdmin
       .from('user_availability')
       .select('id')
       .eq('user_id', actualUserId)
       .eq('event_id', event_id)
       .single()
 
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Error checking existing availability:', checkError)
+      return NextResponse.json({ 
+        error: 'Failed to check existing availability',
+        details: checkError.message 
+      }, { status: 500 })
+    }
+
     if (existingAvailability) {
+      console.log('Updating existing availability record:', existingAvailability.id)
       // Update existing availability
       const { error: updateError } = await supabaseAdmin
         .from('user_availability')
@@ -144,9 +156,14 @@ export async function POST(request: NextRequest) {
 
       if (updateError) {
         console.error('Error updating availability:', updateError)
-        return NextResponse.json({ error: 'Failed to update availability' }, { status: 500 })
+        return NextResponse.json({ 
+          error: 'Failed to update availability',
+          details: updateError.message 
+        }, { status: 500 })
       }
+      console.log('Successfully updated availability')
     } else {
+      console.log('Creating new availability record')
       // Create new availability record
       const { error: insertError } = await supabaseAdmin
         .from('user_availability')
@@ -158,10 +175,15 @@ export async function POST(request: NextRequest) {
 
       if (insertError) {
         console.error('Error creating availability:', insertError)
-        return NextResponse.json({ error: 'Failed to save availability' }, { status: 500 })
+        return NextResponse.json({ 
+          error: 'Failed to save availability',
+          details: insertError.message 
+        }, { status: 500 })
       }
+      console.log('Successfully created availability')
     }
 
+    console.log('Fetching user data for response...')
     // Get user info for the response
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
@@ -171,11 +193,16 @@ export async function POST(request: NextRequest) {
 
     if (userError) {
       console.error('Error fetching user data:', userError)
-      return NextResponse.json({ error: 'Failed to fetch user data' }, { status: 500 })
+      return NextResponse.json({ 
+        error: 'Failed to fetch user data',
+        details: userError.message 
+      }, { status: 500 })
     }
 
+    console.log('Successfully fetched user data:', userData)
+
     // Return minimal response to avoid "data too long" error
-    return NextResponse.json({
+    const response = {
       success: true,
       event_id: event_id,
       user: {
@@ -184,7 +211,10 @@ export async function POST(request: NextRequest) {
         telegram_user_id: userData.telegram_user_id
       },
       message: 'Availability saved successfully'
-    })
+    }
+
+    console.log('Returning success response:', response)
+    return NextResponse.json(response)
 
   } catch (error) {
     console.error('Error in POST /api/webapp-submit:', error)
