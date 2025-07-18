@@ -23,306 +23,351 @@ from supabase_db import db
 from classes import User, Event
 
 
-
 load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
-#AWS_ENDPOINT = os.getenv('AWS_ENDPOINT')
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+DATEPICKER_URL = os.getenv("DATEPICKER_URL", "https://localhost:3000/datepicker")
+DRAGSELECTOR_URL = os.getenv("DRAGSELECTOR_URL", "https://localhost:3000/dragselector/")
+# AWS_ENDPOINT = os.getenv('AWS_ENDPOINT')
 WEBHOOK_PORT = 443
 WEBHOOK_URL_BASE = "https://%s:%s" % (WEBHOOK_HOST, WEBHOOK_PORT)
 WEBHOOK_URL_PATH = "/%s/" % (TOKEN)
 
 
-
 logger = telebot.logger
 telebot.logger.setLevel(logging.DEBUG)
 
-bot = telebot.TeleBot(TOKEN, parse_mode='HTML', threaded=False) # You can set parse_mode by default. HTML or MARKDOWN
+bot = telebot.TeleBot(
+    TOKEN, parse_mode="HTML", threaded=False
+)  # You can set parse_mode by default. HTML or MARKDOWN
 app = fastapi.FastAPI(docs=None, redoc_url=None)
 app.type = "00"
 
+
 # Empty webserver index, return nothing, just http 200
-@app.get('/')
+@app.get("/")
 def index():
-	return ''
+    return ""
 
 
-
-#"""######################################COMMANDS"""
+# """######################################COMMANDS"""
 bot.set_my_commands(
-	commands=[
-		telebot.types.BotCommand("/start", "Starts the bot!"),
-		telebot.types.BotCommand("/help", "Help"),
-		#telebot.types.BotCommand("/event", "Creates a new event")
-	],
-	# scope=telebot.types.BotCommandScopeChat(12345678)  # use for personal command for users
-	# scope=telebot.types.BotCommandScopeAllPrivateChats()  # use for all private chats
+    commands=[
+        telebot.types.BotCommand("/start", "Starts the bot!"),
+        telebot.types.BotCommand("/help", "Help"),
+        # telebot.types.BotCommand("/event", "Creates a new event")
+    ],
+    # scope=telebot.types.BotCommandScopeChat(12345678)  # use for personal command for users
+    # scope=telebot.types.BotCommandScopeAllPrivateChats()  # use for all private chats
 )
 
-@bot.message_handler(commands=['start'])
+
+@bot.message_handler(commands=["start"])
 def send_welcome(message):
-	reply_message = """<b>meet when ah? –</b> Say hello to efficient planning and wave goodbye to "so when r we meeting ah?". 
+    reply_message = """<b>meet when ah? –</b> Say hello to efficient planning and wave goodbye to "so when r we meeting ah?". 
 This bot is for the trip that <b>will</b> make it out of the groupchat. 
 
 Click <b>Create Event</b> to get started <b>now</b>!
 
 Need help? Type /help for more info on commands!
-	""" # Create events in private messages using /event, and send your invites to the group!
+	"""  # Create events in private messages using /event, and send your invites to the group!
 
-	if message.chat.type == 'private':
-		# Use new Supabase user management
-		user = db.get_or_create_user(
-			tele_id=str(message.from_user.id),
-			tele_username=str(message.from_user.username) if message.from_user.username else None
-		)
-		
-		# Update user status if needed
-		if not user.initialised or not user.callout_cleared:
-			user.initialised = True
-			user.callout_cleared = True
-			db.update_user(user)
+    if message.chat.type == "private":
+        # Use new Supabase user management
+        user = db.get_or_create_user(
+            tele_id=str(message.from_user.id),
+            tele_username=(
+                str(message.from_user.username) if message.from_user.username else None
+            ),
+        )
 
-		markup = types.ReplyKeyboardMarkup(row_width=1)
-		web_app_info = types.WebAppInfo(url="https://localhost:3000/datepicker")
-		web_app_button = types.KeyboardButton(text="Create Event", web_app=web_app_info)
-		markup.add(web_app_button)
+        # Update user status if needed
+        if not user.initialised or not user.callout_cleared:
+            user.initialised = True
+            user.callout_cleared = True
+            db.update_user(user)
 
-		bot.reply_to(message, reply_message, reply_markup=markup)
-	
-	else:
-		bot.reply_to(message, reply_message)
-	  
+        markup = types.ReplyKeyboardMarkup(row_width=1)
+        web_app_info = types.WebAppInfo(url=DATEPICKER_URL)
+        web_app_button = types.KeyboardButton(text="Create Event", web_app=web_app_info)
+        markup.add(web_app_button)
+
+        bot.reply_to(message, reply_message, reply_markup=markup)
+
+    else:
+        bot.reply_to(message, reply_message)
 
 
-@bot.message_handler(commands=['help'])
+@bot.message_handler(commands=["help"])
 def help(message):
-	reply_message = """New to <b>meet when ah?</b> <b>DM</b> me <b>/start</b> to create a new event!
+    reply_message = """New to <b>meet when ah?</b> <b>DM</b> me <b>/start</b> to create a new event!
 	
 	"""
-	bot.reply_to(message, reply_message)
-	
-@bot.message_handler(content_types=['web_app_data'])
+    bot.reply_to(message, reply_message)
+
+
+@bot.message_handler(content_types=["web_app_data"])
 def handle_webapp(message):
-	bot.send_message(message.chat.id, "Event Saved!", reply_markup=types.ReplyKeyboardRemove())
-	web_app_data = json.loads(message.web_app_data.data)
-	ic(web_app_data)
-	web_app_number = web_app_data["web_app_number"]
-	
-	if web_app_number == 0:
-		# Creating a new event
-		event_name = web_app_data["event_name"]
-		event_details = web_app_data["event_details"]
-		start_date = web_app_data["start"]
-		end_date = web_app_data["end"]
+    bot.send_message(
+        message.chat.id, "Event Saved!", reply_markup=types.ReplyKeyboardRemove()
+    )
+    web_app_data = json.loads(message.web_app_data.data)
+    ic(web_app_data)
+    web_app_number = web_app_data["web_app_number"]
 
-		if start_date is None or end_date is None:
-			bot.send_message(message.chat.id, "Enter in valid date pls")
-			return
-		
-		# Parse dates
-		start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-		end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    if web_app_number == 0:
+        # Creating a new event
+        event_name = web_app_data["event_name"]
+        event_details = web_app_data["event_details"]
+        start_date = web_app_data["start"]
+        end_date = web_app_data["end"]
 
-		# Get or create user
-		creator = db.get_or_create_user(
-			tele_id=str(message.chat.id),
-			tele_username=str(message.from_user.username) if message.from_user.username else None
-		)
+        if start_date is None or end_date is None:
+            bot.send_message(message.chat.id, "Enter in valid date pls")
+            return
 
-		# Create new event using Supabase classes
-		event = Event(
-			event_id=''.join(random.choices(string.ascii_letters + string.digits, k=16)),
-			event_name=event_name,
-			event_details=event_details,
-			creator_id=creator.id,
-			start_date=start_date,
-			end_date=end_date
-		)
-		
-		created_event = db.create_event(event)
-		
-		# Generate display text
-		display_text = created_event.generate_display_text()
-		created_event.display_text = display_text
-		db.update_event(created_event)
+        # Parse dates
+        start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
 
-		bot.send_message(message.chat.id, "You can continue to additional settings by clicking the button below, or click done.")
-		markup = types.InlineKeyboardMarkup()
-		share_button = types.InlineKeyboardButton(text="Share", switch_inline_query=created_event.event_name + ":" + created_event.event_id)
-		markup.add(share_button)
-		bot.send_message(message.chat.id, display_text, reply_markup=markup)
+        # Get or create user
+        creator = db.get_or_create_user(
+            tele_id=str(message.chat.id),
+            tele_username=(
+                str(message.from_user.username) if message.from_user.username else None
+            ),
+        )
 
-	elif web_app_number == 1:
-		# Setting user availability
-		tele_id = message.from_user.id
-		availability_data = web_app_data["hours_available"]["dateTimes"]
-		event_id = web_app_data["event_id"]
-		
-		# Get user and event
-		user = db.get_user_by_tele_id(str(tele_id))
-		event = db.get_event_by_event_id(event_id)
-		
-		if user and event:
-			# Set user availability using new system
-			db.set_user_availability(event.id, user.id, availability_data)
-			ic("User availability updated successfully")
+        # Create new event using Supabase classes
+        event = Event(
+            event_id="".join(
+                random.choices(string.ascii_letters + string.digits, k=16)
+            ),
+            event_name=event_name,
+            event_details=event_details,
+            creator_id=creator.id,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
-	
+        created_event = db.create_event(event)
+
+        # Generate display text
+        display_text = created_event.generate_display_text()
+        created_event.display_text = display_text
+        db.update_event(created_event)
+
+        bot.send_message(
+            message.chat.id,
+            "You can continue to additional settings by clicking the button below, or click done.",
+        )
+        markup = types.InlineKeyboardMarkup()
+        share_button = types.InlineKeyboardButton(
+            text="Share",
+            switch_inline_query=created_event.event_name + ":" + created_event.event_id,
+        )
+        markup.add(share_button)
+        bot.send_message(message.chat.id, display_text, reply_markup=markup)
+
+    elif web_app_number == 1:
+        # Setting user availability
+        tele_id = message.from_user.id
+        availability_data = web_app_data["hours_available"]["dateTimes"]
+        event_id = web_app_data["event_id"]
+
+        # Get user and event
+        user = db.get_user_by_tele_id(str(tele_id))
+        event = db.get_event_by_event_id(event_id)
+
+        if user and event:
+            # Set user availability using new system
+            db.set_user_availability(event.id, user.id, availability_data)
+            ic("User availability updated successfully")
 
 
 @bot.inline_handler(lambda query: len(query.query) > 0)
 def query_text(inline_query):
-	try:
-		event_name = inline_query.query.split(":")[0]
-		event_id = inline_query.query.split(":")[1]
-		
-		# Get event using new Supabase system
-		event = db.get_event_by_event_id(event_id)
-		if not event:
-			return
-			
-		text = event.display_text or event.generate_display_text()
-		
-		r = types.InlineQueryResultArticle(
-			id='1', title=inline_query.query,
-			input_message_content=types.InputTextMessageContent(text),
-			reply_markup=types.InlineKeyboardMarkup().add(
-				types.InlineKeyboardButton('Join event', callback_data=event.event_id),
-				types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + event.event_id))
-			)
-		)
-		bot.answer_inline_query(inline_query.id, [r])
-	except Exception as e:
-		ic(f"Error in inline query: {e}")
-		print(e)
+    try:
+        event_name = inline_query.query.split(":")[0]
+        event_id = inline_query.query.split(":")[1]
+
+        # Get event using new Supabase system
+        event = db.get_event_by_event_id(event_id)
+        if not event:
+            return
+
+        text = event.display_text or event.generate_display_text()
+
+        r = types.InlineQueryResultArticle(
+            id="1",
+            title=inline_query.query,
+            input_message_content=types.InputTextMessageContent(text),
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("Join event", callback_data=event.event_id),
+                types.InlineKeyboardButton(
+                    "Calculate Best Timing",
+                    callback_data=str("Calculate " + event.event_id),
+                ),
+            ),
+        )
+        bot.answer_inline_query(inline_query.id, [r])
+    except Exception as e:
+        ic(f"Error in inline query: {e}")
+        print(e)
 
 
 def create_web_app_url(base_url, data):
-    #base_url = 'https://your-web-app.com/'
+    # base_url = 'https://your-web-app.com/'
     # Assuming 'data' is a dictionary, convert it to a query string
 
-	query_string = urllib.parse.urlencode(data)
-	ic(query_string)
-	ic(data)
-	return f"{base_url}?{query_string}"
+    query_string = urllib.parse.urlencode(data)
+    ic(query_string)
+    ic(data)
+    return f"{base_url}?{query_string}"
 
 
 @bot.callback_query_handler(func=lambda call: call)
 def handle_join_event(call):
-	new_text = ""
-	message_id = call.inline_message_id
-	
-	if "Calculate" in str(call.data): 
-		# Calculate best timing for event
-		event_id = str(call.data).split()[1]
-		
-		event = db.get_event_by_event_id(event_id)
-		if not event:
-			return
-		
-		# Calculate best meeting times using new system
-		best_slots = db.calculate_best_meeting_times(event.id, 1)
-		if best_slots:
-			best_slot = best_slots[0]
-			
-			# Update event with best timing
-			db.update_event_best_timing(
-				event.id,
-				best_slot.available_date,
-				best_slot.available_time,
-				best_slot.available_time,  # End time same as start for now
-				best_slot.participant_count
-			)
-		
-		# Update display text
-		new_text = db.update_event_display_text(event.id)
+    new_text = ""
+    message_id = call.inline_message_id
 
-	else:
-		# User wants to join event
-		event = db.get_event_by_event_id(str(call.data))
-		if not event:
-			return
-		
-		user = db.get_user_by_tele_id(str(call.from_user.id))
-		
-		# Check if user is already a member
-		if user and db.is_user_event_member(event.id, user.id):
-			return
-		
-		if not user:
-			# Create user if doesn't exist
-			user = User(
-				tele_id=str(call.from_user.id),
-				tele_username=str(call.from_user.username) if call.from_user.username else None,
-				initialised=False,
-				callout_cleared=False
-			)
-			user = db.create_user(user)
-			
-			# Update display text to ask user to start bot
-			event.display_text = (event.display_text or "") + f"\n <b>@{call.from_user.username}, please do /start in a direct message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
-			db.update_event(event)
-			new_text = event.display_text
+    if "Calculate" in str(call.data):
+        # Calculate best timing for event
+        event_id = str(call.data).split()[1]
 
-		elif user.initialised and not user.callout_cleared:
-			# User has started bot, remove callout and add to event
-			old_string = f"\n <b>@{call.from_user.username}, please do /start in a private message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
-			if event.display_text:
-				event.display_text = event.display_text.replace(old_string, "")
-			
-			# Add user to event
-			db.add_event_member(event.id, user.id)
-			
-			# Update display text
-			new_text = db.update_event_display_text(event.id)
-			
-			# Clear user callout
-			user.callout_cleared = True
-			db.update_user(user)
+        event = db.get_event_by_event_id(event_id)
+        if not event:
+            return
 
-		else:
-			# User is initialized, add to event
-			db.add_event_member(event.id, user.id)
-			
-			# Update display text
-			new_text = db.update_event_display_text(event.id)
-			
-			# Ask for availability
-			ask_availability(call.from_user.id, event.event_id)
-			ic("Asking Availability...")
+        # Calculate best meeting times using new system
+        best_slots = db.calculate_best_meeting_times(event.id, 1)
+        if best_slots:
+            best_slot = best_slots[0]
 
-	# Update the inline message
-	bot.edit_message_text(text=f"{new_text}",
-							inline_message_id=message_id,
-							reply_markup=types.InlineKeyboardMarkup().add(
-								types.InlineKeyboardButton('Join event', callback_data=str(call.data).split()[1] if "Calculate" in str(call.data) else str(call.data)),
-								types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + (str(call.data).split()[1] if "Calculate" in str(call.data) else str(call.data))))))
+            # Update event with best timing
+            db.update_event_best_timing(
+                event.id,
+                best_slot.available_date,
+                best_slot.available_time,
+                best_slot.available_time,  # End time same as start for now
+                best_slot.participant_count,
+            )
+
+        # Update display text
+        new_text = db.update_event_display_text(event.id)
+
+    else:
+        # User wants to join event
+        event = db.get_event_by_event_id(str(call.data))
+        if not event:
+            return
+
+        user = db.get_user_by_tele_id(str(call.from_user.id))
+
+        # Check if user is already a member
+        if user and db.is_user_event_member(event.id, user.id):
+            return
+
+        if not user:
+            # Create user if doesn't exist
+            user = User(
+                tele_id=str(call.from_user.id),
+                tele_username=(
+                    str(call.from_user.username) if call.from_user.username else None
+                ),
+                initialised=False,
+                callout_cleared=False,
+            )
+            user = db.create_user(user)
+
+            # Update display text to ask user to start bot
+            event.display_text = (
+                (event.display_text or "")
+                + f"\n <b>@{call.from_user.username}, please do /start in a direct message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
+            )
+            db.update_event(event)
+            new_text = event.display_text
+
+        elif user.initialised and not user.callout_cleared:
+            # User has started bot, remove callout and add to event
+            old_string = f"\n <b>@{call.from_user.username}, please do /start in a private message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
+            if event.display_text:
+                event.display_text = event.display_text.replace(old_string, "")
+
+            # Add user to event
+            db.add_event_member(event.id, user.id)
+
+            # Update display text
+            new_text = db.update_event_display_text(event.id)
+
+            # Clear user callout
+            user.callout_cleared = True
+            db.update_user(user)
+
+        else:
+            # User is initialized, add to event
+            db.add_event_member(event.id, user.id)
+
+            # Update display text
+            new_text = db.update_event_display_text(event.id)
+
+            # Ask for availability
+            ask_availability(call.from_user.id, event.event_id)
+            ic("Asking Availability...")
+
+    # Update the inline message
+    bot.edit_message_text(
+        text=f"{new_text}",
+        inline_message_id=message_id,
+        reply_markup=types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton(
+                "Join event",
+                callback_data=(
+                    str(call.data).split()[1]
+                    if "Calculate" in str(call.data)
+                    else str(call.data)
+                ),
+            ),
+            types.InlineKeyboardButton(
+                "Calculate Best Timing",
+                callback_data=str(
+                    "Calculate "
+                    + (
+                        str(call.data).split()[1]
+                        if "Calculate" in str(call.data)
+                        else str(call.data)
+                    )
+                ),
+            ),
+        ),
+    )
+
 
 def ask_availability(tele_id, event_id):
-	ic("here")
-	text = "Click the button below to set your availability!"
-	
-	# Get event using new Supabase system
-	event = db.get_event_by_event_id(str(event_id))
-	if not event:
-		ic(f"Event not found: {event_id}")
-		return
+    ic("here")
+    text = "Click the button below to set your availability!"
 
-	data = {
-		"event_id": event_id,
-		"start": event.start_date.strftime('%Y-%m-%d'),
-		"end": event.end_date.strftime('%Y-%m-%d'),
-		"event_name": event.event_name
-	}
-	
-	markup = types.ReplyKeyboardMarkup(row_width=1)
-	url = create_web_app_url("https://meetwhenah.deploy.jensenhshoots.com/dragselector/", data=data)
-	print(url)
-	web_app_info = types.WebAppInfo(url=url)
-	web_app_button = types.KeyboardButton(text="Set availability", web_app=web_app_info)
-	markup.add(web_app_button)
+    # Get event using new Supabase system
+    event = db.get_event_by_event_id(str(event_id))
+    if not event:
+        ic(f"Event not found: {event_id}")
+        return
 
-	bot.send_message(tele_id, text, reply_markup=markup)
+    data = {
+        "event_id": event_id,
+        "start": event.start_date.strftime("%Y-%m-%d"),
+        "end": event.end_date.strftime("%Y-%m-%d"),
+        "event_name": event.event_name,
+    }
+
+    markup = types.ReplyKeyboardMarkup(row_width=1)
+    url = create_web_app_url(DRAGSELECTOR_URL, data=data)
+    print(url)
+    web_app_info = types.WebAppInfo(url=url)
+    web_app_button = types.KeyboardButton(text="Set availability", web_app=web_app_info)
+    markup.add(web_app_button)
+
+    bot.send_message(tele_id, text, reply_markup=markup)
 
 
 ############################# WEBHOOK STUFF ###############################################
@@ -344,12 +389,12 @@ def ask_availability(tele_id, event_id):
 
 ############################# POLLING SETUP ###############################################
 if __name__ == "__main__":
-	print("Starting bot with polling...")
-	bot.remove_webhook()
-	bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    print("Starting bot with polling...")
+    bot.remove_webhook()
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
 
 ########################### LAMBDA STUFF #################################################
-#bot.remove_webhook()
+# bot.remove_webhook()
 # time.sleep(0.1)
 
 # webhook_info = bot.get_webhook_info()
@@ -444,4 +489,3 @@ def cal(c):
 			#ic(start_date)
 			#ic(end_date)
 """
-
