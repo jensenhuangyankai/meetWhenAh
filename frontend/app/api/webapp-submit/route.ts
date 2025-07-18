@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
   try {
     const body: WebAppSubmission = await request.json()
     
+    console.log('Received webapp submission:', body)
+    
     const {
       event_id,
       hours_available,
@@ -54,6 +56,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Debug logging
+    console.log('User info received:', { user_id, user_name, telegram_user_id })
+
     // Convert the webapp format to our database format
     const availableSlots = hours_available.dateTimes.map(slot => ({
       date: convertDateFormat(slot.date),
@@ -64,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     // If no user_id provided, try to find or create user based on telegram_user_id or user_name
     if (!actualUserId && (telegram_user_id || user_name)) {
-      if (telegram_user_id) {
+      if (telegram_user_id && telegram_user_id !== 'undefined') {
         // Try to find existing user by telegram_user_id
         const { data: existingUser } = await supabaseAdmin
           .from('users')
@@ -74,7 +79,7 @@ export async function POST(request: NextRequest) {
 
         if (existingUser) {
           actualUserId = existingUser.id
-        } else if (user_name) {
+        } else if (user_name && user_name !== 'Unknown User') {
           // Create new user
           const { data: newUser, error: createUserError } = await supabaseAdmin
             .from('users')
@@ -92,12 +97,29 @@ export async function POST(request: NextRequest) {
 
           actualUserId = newUser.id
         }
+      } else if (user_name && user_name !== 'Unknown User') {
+        // Try to create user with just name if no telegram_user_id
+        const { data: newUser, error: createUserError } = await supabaseAdmin
+          .from('users')
+          .insert({
+            name: user_name
+          })
+          .select('id')
+          .single()
+
+        if (createUserError) {
+          console.error('Error creating user:', createUserError)
+          return NextResponse.json({ error: 'Failed to create user' }, { status: 500 })
+        }
+
+        actualUserId = newUser.id
       }
     }
 
     if (!actualUserId) {
       return NextResponse.json({ 
-        error: 'user_id is required or user_name/telegram_user_id must be provided to create user' 
+        error: 'user_id is required or valid user_name/telegram_user_id must be provided to create user',
+        debug_info: { user_id, user_name, telegram_user_id }
       }, { status: 400 })
     }
 

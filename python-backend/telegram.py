@@ -114,13 +114,8 @@ def handle_webapp(message):
     web_app_data = json.loads(message.web_app_data.data)
     ic("Received webapp data:", web_app_data)
     
-    # Check if this is the new API response format (simplified)
-    if "success" in web_app_data and "event_id" in web_app_data and "user" in web_app_data:
-        # New format: API already processed and saved the data
-        handle_webapp_api_response(message, web_app_data)
-    else:
-        # Legacy format: process the full data here
-        handle_webapp_legacy_format(message, web_app_data)
+    # Handle the API response format
+    handle_webapp_api_response(message, web_app_data)
 
 
 def handle_webapp_api_response(message, response_data):
@@ -158,86 +153,6 @@ def handle_webapp_api_response(message, response_data):
             
     except Exception as e:
         ic(f"Error handling webapp API response: {e}")
-        bot.send_message(message.chat.id, "❌ Error processing your submission. Please try again.")
-
-
-def handle_webapp_legacy_format(message, web_app_data):
-    """Handle the original full webapp data format (fallback)"""
-    try:
-        web_app_number = web_app_data["web_app_number"]
-
-        if web_app_number == 0:
-            # Creating a new event
-            event_name = web_app_data["event_name"]
-            event_details = web_app_data["event_details"]
-            start_date = web_app_data["start"]
-            end_date = web_app_data["end"]
-
-            if start_date is None or end_date is None:
-                bot.send_message(message.chat.id, "Enter in valid date pls")
-                return
-
-            # Parse dates
-            start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-            # Get or create user
-            creator = db.get_or_create_user(
-                tele_id=str(message.chat.id),
-                tele_username=(
-                    str(message.from_user.username) if message.from_user.username else None
-                ),
-            )
-
-            # Create new event using Supabase classes
-            event = Event(
-                event_id="".join(
-                    random.choices(string.ascii_letters + string.digits, k=16)
-                ),
-                event_name=event_name,
-                event_details=event_details,
-                creator_id=creator.id,
-                start_date=start_date,
-                end_date=end_date,
-            )
-
-            created_event = db.create_event(event)
-
-            # Generate display text
-            display_text = created_event.generate_display_text()
-            created_event.display_text = display_text
-            db.update_event(created_event)
-
-            bot.send_message(
-                message.chat.id,
-                "You can continue to additional settings by clicking the button below, or click done.",
-            )
-            markup = types.InlineKeyboardMarkup()
-            share_button = types.InlineKeyboardButton(
-                text="Share",
-                switch_inline_query=created_event.event_name + ":" + created_event.event_id,
-            )
-            markup.add(share_button)
-            bot.send_message(message.chat.id, display_text, reply_markup=markup)
-
-        elif web_app_number == 1:
-            # Setting user availability (legacy format)
-            tele_id = message.from_user.id
-            availability_data = web_app_data["hours_available"]["dateTimes"]
-            event_id = web_app_data["event_id"]
-
-            # Get user and event
-            user = db.get_user_by_tele_id(str(tele_id))
-            event = db.get_event_by_event_id(event_id)
-
-            if user and event:
-                # Set user availability using new system
-                db.set_user_availability(event.id, user.id, availability_data)
-                ic("User availability updated successfully")
-                bot.send_message(message.chat.id, "✅ Your availability has been saved!")
-                
-    except Exception as e:
-        ic(f"Error handling legacy webapp format: {e}")
         bot.send_message(message.chat.id, "❌ Error processing your submission. Please try again.")
 
 

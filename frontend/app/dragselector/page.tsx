@@ -32,6 +32,10 @@ export default function Home() {
 
   const submit = async () => {
     try {
+      // Add debug logging for user info
+      console.log('Telegram WebApp data:', tg?.initDataUnsafe);
+      console.log('User from Telegram:', tg?.initDataUnsafe?.user);
+      
       // First, submit to our API to save the data
       const webappData = {
         web_app_number: 1,
