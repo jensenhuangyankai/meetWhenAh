@@ -114,14 +114,22 @@ def handle_webapp(message):
     web_app_data = json.loads(message.web_app_data.data)
     ic("Received webapp data:", web_app_data)
     
-    # Handle the API response format
-    handle_webapp_api_response(message, web_app_data)
+    # Route to appropriate handler based on data structure
+    if "success" in web_app_data and "event_id" in web_app_data and "user" in web_app_data:
+        # Availability submission response from API
+        handle_availability_submission(message, web_app_data)
+    elif "web_app_number" in web_app_data and web_app_data["web_app_number"] == 0:
+        # Event creation from datepicker
+        handle_event_creation(message, web_app_data)
+    else:
+        ic("Unknown webapp data format:", web_app_data)
+        bot.send_message(message.chat.id, "❌ Unknown data format received")
 
 
-def handle_webapp_api_response(message, response_data):
-    """Handle the simplified response from the new webapp API"""
+def handle_availability_submission(message, response_data):
+    """Handle availability submission response from the webapp API"""
     try:
-        ic("Processing API response:", response_data)
+        ic("Processing availability submission:", response_data)
         
         if response_data.get("success"):
             event_id = response_data["event_id"]
@@ -164,8 +172,70 @@ def handle_webapp_api_response(message, response_data):
             bot.send_message(message.chat.id, full_error_msg)
             
     except Exception as e:
-        ic(f"Error handling webapp API response: {e}")
+        ic(f"Error handling availability submission: {e}")
         bot.send_message(message.chat.id, f"❌ Error processing your submission: {str(e)}")
+
+
+def handle_event_creation(message, event_data):
+    """Handle event creation from the datepicker webapp"""
+    try:
+        ic("Processing event creation:", event_data)
+        
+        event_name = event_data["event_name"]
+        event_details = event_data["event_details"]
+        start_date = event_data["start"]
+        end_date = event_data["end"]
+
+        if start_date is None or end_date is None:
+            bot.send_message(message.chat.id, "❌ Please enter valid dates")
+            return
+
+        # Parse dates
+        start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+        # Get or create user
+        creator = db.get_or_create_user(
+            tele_id=str(message.chat.id),
+            tele_username=(
+                str(message.from_user.username) if message.from_user.username else None
+            ),
+        )
+
+        # Create new event using Supabase classes
+        event = Event(
+            event_id="".join(
+                random.choices(string.ascii_letters + string.digits, k=16)
+            ),
+            event_name=event_name,
+            event_details=event_details,
+            creator_id=creator.id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        created_event = db.create_event(event)
+
+        # Generate display text
+        display_text = created_event.generate_display_text()
+        created_event.display_text = display_text
+        db.update_event(created_event)
+
+        bot.send_message(
+            message.chat.id,
+            "✅ Event created successfully! You can share it using the button below.",
+        )
+        markup = types.InlineKeyboardMarkup()
+        share_button = types.InlineKeyboardButton(
+            text="Share Event",
+            switch_inline_query=created_event.event_name + ":" + created_event.event_id,
+        )
+        markup.add(share_button)
+        bot.send_message(message.chat.id, display_text, reply_markup=markup)
+                
+    except Exception as e:
+        ic(f"Error handling event creation: {e}")
+        bot.send_message(message.chat.id, "❌ Error creating event. Please try again.")
 
 
 @bot.inline_handler(lambda query: len(query.query) > 0)

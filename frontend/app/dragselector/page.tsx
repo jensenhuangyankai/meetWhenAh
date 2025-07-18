@@ -6,6 +6,11 @@ import NextButton from '@/components/dragselector/NextButton'
 import RemoveNightButton from '@/components/dragselector/RemoveNightButton'
 import PreviousButton from '@/components/dragselector/PreviousButton'
 import SubmitButton from '@/components/dragselector/SubmitButton'
+import { 
+  getTelegramUserId, 
+  getTelegramDisplayName, 
+  getTelegramUserDebugInfo 
+} from '@/lib/telegram-utils';
 
 export default function Home() { 
 
@@ -22,19 +27,52 @@ export default function Home() {
   })
 
   const [tg, setTg] = useState<any>(null);
+  const [isTelegramReady, setIsTelegramReady] = useState<boolean>(false);
+  
   useEffect(() => {
-    if (window.Telegram) {
-      setTg(window.Telegram.WebApp);
-    } else {
-      console.error("Telegram Web App script not loaded");
-    }
+    const initTelegram = () => {
+      if (window.Telegram && window.Telegram.WebApp) {
+        console.log('Telegram WebApp found, initializing...');
+        const webApp = window.Telegram.WebApp;
+        webApp.ready();
+        setTg(webApp);
+        setIsTelegramReady(true);
+        
+        // Log all available Telegram data for debugging using new utilities
+        console.log('=== TELEGRAM SDK DEBUG INFO ===');
+        console.log('Telegram WebApp initialized.');
+        console.log('Debug info from new SDK:', getTelegramUserDebugInfo());
+        console.log('User ID:', getTelegramUserId());
+        console.log('Display Name:', getTelegramDisplayName());
+        console.log('=== END TELEGRAM SDK DEBUG ===');
+      } else {
+        console.log('Telegram WebApp not yet available, retrying...');
+        setTimeout(initTelegram, 100);
+      }
+    };
+    
+    initTelegram();
   }, []);
 
   const submit = async () => {
     try {
-      // Add debug logging for user info
-      console.log('Telegram WebApp data:', tg?.initDataUnsafe);
-      console.log('User from Telegram:', tg?.initDataUnsafe?.user);
+      // Ensure Telegram is ready
+      if (!isTelegramReady || !tg) {
+        console.error('Telegram WebApp not ready yet');
+        alert('Please wait for the app to fully load before submitting.');
+        return;
+      }
+
+      // Get user info using new SDK utilities
+      const userId = getTelegramUserId();
+      const displayName = getTelegramDisplayName();
+      const debugInfo = getTelegramUserDebugInfo();
+      
+      console.log('=== SUBMISSION DEBUG INFO ===');
+      console.log('User ID from new SDK:', userId);
+      console.log('Display Name from new SDK:', displayName);
+      console.log('Complete debug info:', debugInfo);
+      console.log('=== END SUBMISSION DEBUG ===');
       
       // First, submit to our API to save the data
       const webappData = {
@@ -44,9 +82,17 @@ export default function Home() {
         start: data.start.toString(),
         end: data.end.toString(),
         hours_available: selectedElements.toJSON(),
-        // Add user info if available from Telegram
-        user_name: tg?.initDataUnsafe?.user?.first_name || 'Unknown User',
-        telegram_user_id: tg?.initDataUnsafe?.user?.id?.toString()
+        user_name: displayName,
+        telegram_user_id: userId,
+        // Add additional debug info
+        debug_telegram_data: {
+          has_telegram: !!tg,
+          has_user_id: !!userId,
+          display_name: displayName,
+          sdk_debug_info: debugInfo,
+          telegram_version: tg.version,
+          platform: tg.platform
+        }
       }
 
       console.log('Submitting to API:', webappData);
@@ -183,8 +229,20 @@ export default function Home() {
         <DragSelector removeNight={removeNight} startDate={startDate} numDays={7} selectedElements={selectedElements} setSelectedElements={setSelectedElements} /> 
       </div>
       <div className="absolute right-0 bottom-0">
-          <SubmitButton onClick={submit} disabled={ selectedElements.size() === 0 } />
+          <SubmitButton 
+            onClick={submit} 
+            disabled={selectedElements.size() === 0 || !isTelegramReady} 
+          />
       </div>
+
+      {/* Debug info */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed top-0 left-0 bg-black text-white p-2 text-xs z-50">
+          <div>Telegram Ready: {isTelegramReady ? 'Yes' : 'No'}</div>
+          <div>User ID: {tg?.initDataUnsafe?.user?.id || 'None'}</div>
+          <div>User Name: {tg?.initDataUnsafe?.user?.first_name || 'None'}</div>
+        </div>
+      )}
 
     </main>
   );
