@@ -115,15 +115,54 @@ def handle_webapp(message):
     ic("Received webapp data:", web_app_data)
     
     # Route to appropriate handler based on data structure
-    if "success" in web_app_data and "event_id" in web_app_data and "user" in web_app_data:
-        # Availability submission response from API
-        handle_availability_submission(message, web_app_data)
+    if "success" in web_app_data and "event_id" in web_app_data:
+        # This is a response from the API (either success or error)
+        if web_app_data.get("success"):
+            # Successful availability submission response from API
+            handle_availability_submission(message, web_app_data)
+        else:
+            # Error response from API
+            handle_api_error_response(message, web_app_data)
     elif "web_app_number" in web_app_data and web_app_data["web_app_number"] == 0:
         # Event creation from datepicker
         handle_event_creation(message, web_app_data)
+    elif "web_app_number" in web_app_data and web_app_data["web_app_number"] == 1:
+        # This is raw dragselector data that should go to API first
+        # This should not happen anymore, but handle it just in case
+        ic("Received raw dragselector data - this should go through API first")
+        bot.send_message(message.chat.id, "❌ Internal error: dragselector data received directly")
     else:
         ic("Unknown webapp data format:", web_app_data)
         bot.send_message(message.chat.id, "❌ Unknown data format received")
+
+
+def handle_api_error_response(message, error_data):
+    """Handle error response from the webapp API"""
+    try:
+        ic("Processing API error response:", error_data)
+        
+        error_msg = error_data.get("error", "Unknown error occurred")
+        details = error_data.get("details", "")
+        debug_info = error_data.get("debug_info", {})
+        event_id = error_data.get("event_id", "Unknown")
+        
+        full_error_msg = f"❌ Error saving availability: {error_msg}"
+        if details:
+            full_error_msg += f"\n\nDetails: {details}"
+        if debug_info:
+            # Extract useful debug info for user
+            user_name = debug_info.get("user_name", "Unknown")
+            full_error_msg += f"\n\nDebug: User detected as '{user_name}'"
+            
+        full_error_msg += f"\n\nEvent ID: {event_id}"
+        full_error_msg += "\n\nPlease try again, or contact support if this persists."
+        
+        ic("Sending error message to user:", full_error_msg)
+        bot.send_message(message.chat.id, full_error_msg)
+        
+    except Exception as e:
+        ic(f"Error handling API error response: {e}")
+        bot.send_message(message.chat.id, f"❌ Multiple errors occurred. Please try again later.")
 
 
 def handle_availability_submission(message, response_data):

@@ -63,14 +63,40 @@ export default function Home() {
         return;
       }
 
-      // Get user info using new SDK utilities
+      // Get user info using multiple methods
       const userId = getTelegramUserId();
       const displayName = getTelegramDisplayName();
       const debugInfo = getTelegramUserDebugInfo();
       
+      // Fallback: try to get user info directly from the global Telegram WebApp
+      let fallbackUserId = userId;
+      let fallbackDisplayName = displayName;
+      
+      if (!userId && tg?.initDataUnsafe?.user?.id) {
+        fallbackUserId = tg.initDataUnsafe.user.id.toString();
+        console.log('Using fallback user ID from tg object:', fallbackUserId);
+      }
+      
+      if (displayName === 'Unknown User' && tg?.initDataUnsafe?.user) {
+        const user = tg.initDataUnsafe.user;
+        if (user.first_name) {
+          fallbackDisplayName = user.first_name;
+          if (user.last_name) {
+            fallbackDisplayName += ` ${user.last_name}`;
+          }
+        } else if (user.username) {
+          fallbackDisplayName = user.username;
+        }
+        console.log('Using fallback display name from tg object:', fallbackDisplayName);
+      }
+      
       console.log('=== SUBMISSION DEBUG INFO ===');
       console.log('User ID from new SDK:', userId);
       console.log('Display Name from new SDK:', displayName);
+      console.log('Fallback User ID:', fallbackUserId);
+      console.log('Fallback Display Name:', fallbackDisplayName);
+      console.log('tg.initDataUnsafe:', tg?.initDataUnsafe);
+      console.log('tg.initData:', tg?.initData);
       console.log('Complete debug info:', debugInfo);
       console.log('=== END SUBMISSION DEBUG ===');
       
@@ -82,16 +108,18 @@ export default function Home() {
         start: data.start.toString(),
         end: data.end.toString(),
         hours_available: selectedElements.toJSON(),
-        user_name: displayName,
-        telegram_user_id: userId,
+        user_name: fallbackDisplayName,
+        telegram_user_id: fallbackUserId,
         // Add additional debug info
         debug_telegram_data: {
           has_telegram: !!tg,
-          has_user_id: !!userId,
-          display_name: displayName,
+          has_user_id: !!fallbackUserId,
+          display_name: fallbackDisplayName,
           sdk_debug_info: debugInfo,
           telegram_version: tg.version,
-          platform: tg.platform
+          platform: tg.platform,
+          raw_init_data_unsafe: tg?.initDataUnsafe,
+          raw_init_data: tg?.initData
         }
       }
 

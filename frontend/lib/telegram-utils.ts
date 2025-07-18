@@ -21,7 +21,7 @@ export function getTelegramLaunchParams(): QueryParams {
 
   try {
     const launchParams = retrieveLaunchParams();
-    const param = launchParams.tgWebAppStartParam || "";
+    const param = typeof launchParams.startParam === 'string' ? launchParams.startParam : "";
     const [uuid, chatId, messageThreadId] = param.split("_");
 
     return {
@@ -59,12 +59,32 @@ export function getTelegramUserId(): string | undefined {
   }
 
   try {
-    const launchParams = retrieveLaunchParams();
-    const initData = launchParams.initData as any;
+    // First try the new SDK
+    const launchParams = retrieveLaunchParams() as any;
+    
+    // Try different ways to get user ID from new SDK
+    if (launchParams.initDataUnsafe?.user?.id) {
+      return launchParams.initDataUnsafe.user.id.toString();
+    }
+    
+    // Fallback to raw initData parsing from new SDK
+    if (launchParams.initData && typeof launchParams.initData === 'string') {
+      const params = new URLSearchParams(launchParams.initData);
+      const userStr = params.get('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.id) {
+          return user.id.toString();
+        }
+      }
+    }
 
-    // Get user ID from initData.user.id
-    if (initData?.user?.id) {
-      return initData.user.id.toString();
+    // Fallback to global Telegram WebApp object
+    if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) {
+      const tg = (window as any).Telegram.WebApp;
+      if (tg.initDataUnsafe?.user?.id) {
+        return tg.initDataUnsafe.user.id.toString();
+      }
     }
 
     return undefined;
@@ -85,12 +105,23 @@ export function getTelegramUsername(): string | undefined {
   }
 
   try {
-    const launchParams = retrieveLaunchParams();
-    const initData = launchParams.initData as any;
-
-    // Get username from initData.user.username
-    if (initData?.user?.username) {
-      return initData.user.username;
+    const launchParams = retrieveLaunchParams() as any;
+    
+    // Try different ways to get username
+    if (launchParams.initDataUnsafe?.user?.username) {
+      return launchParams.initDataUnsafe.user.username;
+    }
+    
+    // Fallback to raw initData parsing
+    if (launchParams.initData && typeof launchParams.initData === 'string') {
+      const params = new URLSearchParams(launchParams.initData);
+      const userStr = params.get('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.username) {
+          return user.username;
+        }
+      }
     }
 
     return undefined;
@@ -111,15 +142,32 @@ export function getTelegramFirstName(): string | undefined {
   }
 
   try {
-    const launchParams = retrieveLaunchParams();
-    const initData = launchParams.initData as any;
-
-    // Get first name from initData.user.firstName (or first_name)
-    if (initData?.user?.firstName) {
-      return initData.user.firstName;
+    // First try the new SDK
+    const launchParams = retrieveLaunchParams() as any;
+    
+    // Try different ways to get first name from new SDK
+    if (launchParams.initDataUnsafe?.user?.first_name) {
+      return launchParams.initDataUnsafe.user.first_name;
     }
-    if (initData?.user?.first_name) {
-      return initData.user.first_name;
+    
+    // Fallback to raw initData parsing from new SDK
+    if (launchParams.initData && typeof launchParams.initData === 'string') {
+      const params = new URLSearchParams(launchParams.initData);
+      const userStr = params.get('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.first_name) {
+          return user.first_name;
+        }
+      }
+    }
+
+    // Fallback to global Telegram WebApp object
+    if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) {
+      const tg = (window as any).Telegram.WebApp;
+      if (tg.initDataUnsafe?.user?.first_name) {
+        return tg.initDataUnsafe.user.first_name;
+      }
     }
 
     return undefined;
@@ -140,15 +188,23 @@ export function getTelegramLastName(): string | undefined {
   }
 
   try {
-    const launchParams = retrieveLaunchParams();
-    const initData = launchParams.initData as any;
-
-    // Get last name from initData.user.lastName (or last_name)
-    if (initData?.user?.lastName) {
-      return initData.user.lastName;
+    const launchParams = retrieveLaunchParams() as any;
+    
+    // Try different ways to get last name
+    if (launchParams.initDataUnsafe?.user?.last_name) {
+      return launchParams.initDataUnsafe.user.last_name;
     }
-    if (initData?.user?.last_name) {
-      return initData.user.last_name;
+    
+    // Fallback to raw initData parsing
+    if (launchParams.initData && typeof launchParams.initData === 'string') {
+      const params = new URLSearchParams(launchParams.initData);
+      const userStr = params.get('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.last_name) {
+          return user.last_name;
+        }
+      }
     }
 
     return undefined;
@@ -187,16 +243,32 @@ export function getTelegramUserDebugInfo() {
   }
 
   try {
-    const launchParams = retrieveLaunchParams();
+    const launchParams = retrieveLaunchParams() as any;
+    
+    // Also get global Telegram WebApp data for comparison
+    const globalTg = typeof window !== 'undefined' && (window as any).Telegram?.WebApp;
+    
     return {
       userId: getTelegramUserId(),
       username: getTelegramUsername(),
       firstName: getTelegramFirstName(),
       lastName: getTelegramLastName(),
       displayName: getTelegramDisplayName(),
-      launchParams: launchParams,
-      initData: launchParams.initData,
-      user: (launchParams.initData as any)?.user
+      // New SDK data
+      newSdk: {
+        launchParams: launchParams,
+        initData: launchParams.initData,
+        initDataUnsafe: launchParams.initDataUnsafe,
+        user: launchParams.initDataUnsafe?.user
+      },
+      // Global Telegram WebApp data
+      globalWebApp: globalTg ? {
+        initData: globalTg.initData,
+        initDataUnsafe: globalTg.initDataUnsafe,
+        user: globalTg.initDataUnsafe?.user,
+        version: globalTg.version,
+        platform: globalTg.platform
+      } : null
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Unknown error' };
