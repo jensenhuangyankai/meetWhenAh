@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 python_telegram_bot_calendar==1.0.5
 uvicorn==0.30.1
 grpcio-status==1.60.0
+supabase==2.0.0

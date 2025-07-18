@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Union
 import uvicorn
 import time
+import json
 from icecream import ic
 from datetime import datetime, date, timedelta
 import random
@@ -17,12 +18,14 @@ import string
 import urllib.parse
 import re
 
-from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
+# Import new Supabase classes
+from supabase_db import db
+from classes import User, Event
 
-from databases import *
+
 
 load_dotenv()
-TOKEN = os.getenv('TOKEN')
+TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
 #AWS_ENDPOINT = os.getenv('AWS_ENDPOINT')
 WEBHOOK_PORT = 443
@@ -67,23 +70,20 @@ Need help? Type /help for more info on commands!
 	""" # Create events in private messages using /event, and send your invites to the group!
 
 	if message.chat.type == 'private':
-		db_result = getEntry("Users", "tele_id", str(message.from_user.id))
-		if db_result == None:
-			setEntry("Users", {"tele_id" : str(message.from_user.id),
-							"tele_user" : str(message.from_user.username),
-							"initialised" : True,
-							"callout_cleared" : True})
-		else:
-			if db_result.to_dict()["initialised"] == False:
-				updateEntry(db_result, "initialised", True)
-				updateEntry(db_result, "callout_cleared", True)
-			if db_result.to_dict()["callout_cleared"] == True: #this is in case an initialised user tries to /start again
-				pass
-			#else:
-			#	updateEntry(db_result, "callout_cleared", False) 
+		# Use new Supabase user management
+		user = db.get_or_create_user(
+			tele_id=str(message.from_user.id),
+			tele_username=str(message.from_user.username) if message.from_user.username else None
+		)
+		
+		# Update user status if needed
+		if not user.initialised or not user.callout_cleared:
+			user.initialised = True
+			user.callout_cleared = True
+			db.update_user(user)
 
 		markup = types.ReplyKeyboardMarkup(row_width=1)
-		web_app_info = types.WebAppInfo(url="https://meetwhenah.deploy.jensenhshoots.com/datepicker")
+		web_app_info = types.WebAppInfo(url="https://localhost:3000/datepicker")
 		web_app_button = types.KeyboardButton(text="Create Event", web_app=web_app_info)
 		markup.add(web_app_button)
 
@@ -107,7 +107,9 @@ def handle_webapp(message):
 	web_app_data = json.loads(message.web_app_data.data)
 	ic(web_app_data)
 	web_app_number = web_app_data["web_app_number"]
+	
 	if web_app_number == 0:
+		# Creating a new event
 		event_name = web_app_data["event_name"]
 		event_details = web_app_data["event_details"]
 		start_date = web_app_data["start"]
@@ -116,68 +118,54 @@ def handle_webapp(message):
 		if start_date is None or end_date is None:
 			bot.send_message(message.chat.id, "Enter in valid date pls")
 			return
-		start_date = datetime.strptime(start_date, '%Y-%m-%d')
-		end_date = datetime.strptime(end_date, '%Y-%m-%d')
+		
+		# Parse dates
+		start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+		end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
 
-		def daterange(start_date, end_date):
-			for n in range(int((end_date - start_date).days)):
-				yield start_date + timedelta(n)
-		hours_available = []
+		# Get or create user
+		creator = db.get_or_create_user(
+			tele_id=str(message.chat.id),
+			tele_username=str(message.from_user.username) if message.from_user.username else None
+		)
 
-		for single_date in daterange(start_date, end_date + timedelta(days=1)):
-			time_values = []
-			for hour in range(24):
-				for minute in range(0, 60, 30):
-					time_values.append(f"{hour:02}{minute:02}")
+		# Create new event using Supabase classes
+		event = Event(
+			event_id=''.join(random.choices(string.ascii_letters + string.digits, k=16)),
+			event_name=event_name,
+			event_details=event_details,
+			creator_id=creator.id,
+			start_date=start_date,
+			end_date=end_date
+		)
+		
+		created_event = db.create_event(event)
+		
+		# Generate display text
+		display_text = created_event.generate_display_text()
+		created_event.display_text = display_text
+		db.update_event(created_event)
 
-			day = { str(time): [] for time in time_values }
-			day["date"] = single_date
-			hours_available.append(day)
-
-		text = f"""Date range: {start_date.strftime("%-d %b %Y")} - {end_date.strftime("%-d %b %Y")}
-Best date: []
-Best timing: []
-
-Join this event by clicking the join button below! 
-
-Joining:
----------------
-"""
-		data = {
-			"event_name" : str(event_name),
-			"event_details" : str(event_details),
-			"event_id" : ''.join(random.choices(string.ascii_letters + string.digits, k=16)),
-			"members" : [],
-			"creator" : str(message.chat.id),
-			"start_date" : start_date,
-			"end_date" : end_date,
-			"hours_available": hours_available,
-			"text" : text,
-			
-		}
 		bot.send_message(message.chat.id, "You can continue to additional settings by clicking the button below, or click done.")
-		setEntry("Events", data)
 		markup = types.InlineKeyboardMarkup()
-		share_button = types.InlineKeyboardButton(text="Share", switch_inline_query=data["event_name"] + ":" + data["event_id"])
+		share_button = types.InlineKeyboardButton(text="Share", switch_inline_query=created_event.event_name + ":" + created_event.event_id)
 		markup.add(share_button)
-		bot.send_message(message.chat.id, text, reply_markup=markup)
-
+		bot.send_message(message.chat.id, display_text, reply_markup=markup)
 
 	elif web_app_number == 1:
+		# Setting user availability
 		tele_id = message.from_user.id
-		new_hours_available = web_app_data["hours_available"]["dateTimes"] #data from web app. new.
+		availability_data = web_app_data["hours_available"]["dateTimes"]
 		event_id = web_app_data["event_id"]
-		db_result = getEntry("Events", "event_id", str(event_id))
-		hours_already_available = db_result.to_dict()["hours_available"] #data existing in database
-
-		for new_day in new_hours_available:             # old_day = [date][][][][]
-			for old_day in hours_already_available:
-				if datetime.strptime(new_day['date'], '%d/%m/%Y').date() == old_day["date"].date():
-					old_day[new_day['time']].append(tele_id)
-
-		ic(hours_already_available)
-		#write back to db
-		updateEntry(db_result, "hours_available", hours_already_available)
+		
+		# Get user and event
+		user = db.get_user_by_tele_id(str(tele_id))
+		event = db.get_event_by_event_id(event_id)
+		
+		if user and event:
+			# Set user availability using new system
+			db.set_user_availability(event.id, user.id, availability_data)
+			ic("User availability updated successfully")
 
 	
 
@@ -187,20 +175,25 @@ def query_text(inline_query):
 	try:
 		event_name = inline_query.query.split(":")[0]
 		event_id = inline_query.query.split(":")[1]
-		result = getEntry("Events", "event_id", event_id)
-		text = result.to_dict()["text"]
 		
-	
+		# Get event using new Supabase system
+		event = db.get_event_by_event_id(event_id)
+		if not event:
+			return
+			
+		text = event.display_text or event.generate_display_text()
+		
 		r = types.InlineQueryResultArticle(
 			id='1', title=inline_query.query,
 			input_message_content=types.InputTextMessageContent(text),
 			reply_markup=types.InlineKeyboardMarkup().add(
-				types.InlineKeyboardButton('Join event', callback_data=result.to_dict()["event_id"]),
-				types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + result.to_dict()["event_id"]))
+				types.InlineKeyboardButton('Join event', callback_data=event.event_id),
+				types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + event.event_id))
 			)
 		)
 		bot.answer_inline_query(inline_query.id, [r])
 	except Exception as e:
+		ic(f"Error in inline query: {e}")
 		print(e)
 
 
@@ -218,120 +211,110 @@ def create_web_app_url(base_url, data):
 def handle_join_event(call):
 	new_text = ""
 	message_id = call.inline_message_id
+	
 	if "Calculate" in str(call.data): 
+		# Calculate best timing for event
 		event_id = str(call.data).split()[1]
 		
-
-		#get the longest contiguous series of numbers 
-		
-		best_date = {
-			'final_date': "",
-			'final_start_timing': "",
-			'final_end_timing': "",
-			'max_participants': 0
-		}
-
-		db_result = getEntry("Events", "event_id", event_id)
-		hours_available = db_result.to_dict()["hours_available"]
-		original_text = db_result.to_dict()["text"]
-
-
-		curr_hours_list = []
-		curr_user_list = []
-		for day in hours_available:
-			ic(day)
-			date = day['date']
-			
-			for hour, user_list in day.items():
-				if type(user_list) is list:
-					if user_list == curr_user_list and len(user_list) > 0:
-						print("scenario1")
-						curr_hours_list.append(hour)
-						best_date["final_end_timing"] = hour
-						best_date['max_participants'] += 1
-					elif len(user_list) > len(curr_user_list) and len(user_list) >= best_date['max_participants']:
-						print("----------------scenario2----------------")
-						curr_user_list = user_list
-						curr_hours_list = [hour]
-						
-						best_date['final_date'] = date
-						best_date['final_start_timing'] = hour
-
-					else:
-						print("----------------scenario3----------------")
-						curr_hours_list = []
-						curr_user_list = []
-		ic(best_date)
-		date_pattern = r'Best date:\s*\[\]'
-		timing_pattern = r'Best timing:\s*\[\]'
-		best_date['final_start_timing'] = "0630"
-		best_date['final_end_timing'] = "0730"
-		best_timing_str = best_date['final_start_timing'] + ' - ' + best_date['final_end_timing']
-		new_text = re.sub(date_pattern, f"Best date: {best_date['final_date'].date()}", original_text)
-		new_text = re.sub(timing_pattern, f"Best timing: [{best_timing_str}]", new_text)
-		updateEntry(db_result, "text", new_text)
-
-	else:
-		
-		db_result = getEntry("Events", "event_id", str(call.data))
-		members = db_result.to_dict()["members"]
-		if str(call.from_user.id) in members:
+		event = db.get_event_by_event_id(event_id)
+		if not event:
 			return
 		
-		event_id = db_result.to_dict()["event_id"]
-		original_text = db_result.to_dict()["text"]
-		
-		db_result2 = getEntry("Users", "tele_id", str(call.from_user.id))
-		if db_result2 == None:
-			new_text = original_text + f"\n <b>@{call.from_user.username}, please do /start in a direct message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
-			updateEntry(db_result, "text", new_text)
-
-			setEntry("Users", {"tele_id" : str(call.from_user.id),
-						"tele_user" : str(call.from_user.username),
-						"initialised" : False,
-						"callout_cleared" : False})
+		# Calculate best meeting times using new system
+		best_slots = db.calculate_best_meeting_times(event.id, 1)
+		if best_slots:
+			best_slot = best_slots[0]
 			
+			# Update event with best timing
+			db.update_event_best_timing(
+				event.id,
+				best_slot.available_date,
+				best_slot.available_time,
+				best_slot.available_time,  # End time same as start for now
+				best_slot.participant_count
+			)
+		
+		# Update display text
+		new_text = db.update_event_display_text(event.id)
 
-		elif db_result2.to_dict()["initialised"] == True and db_result2.to_dict()["callout_cleared"] == False:
+	else:
+		# User wants to join event
+		event = db.get_event_by_event_id(str(call.data))
+		if not event:
+			return
+		
+		user = db.get_user_by_tele_id(str(call.from_user.id))
+		
+		# Check if user is already a member
+		if user and db.is_user_event_member(event.id, user.id):
+			return
+		
+		if not user:
+			# Create user if doesn't exist
+			user = User(
+				tele_id=str(call.from_user.id),
+				tele_username=str(call.from_user.username) if call.from_user.username else None,
+				initialised=False,
+				callout_cleared=False
+			)
+			user = db.create_user(user)
+			
+			# Update display text to ask user to start bot
+			event.display_text = (event.display_text or "") + f"\n <b>@{call.from_user.username}, please do /start in a direct message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
+			db.update_event(event)
+			new_text = event.display_text
+
+		elif user.initialised and not user.callout_cleared:
+			# User has started bot, remove callout and add to event
 			old_string = f"\n <b>@{call.from_user.username}, please do /start in a private message with me at @meetwhenah_bot. Click the join button again when you are done!</b>"
-			new_text = original_text.replace(old_string, "")
-
-			members.append(str(call.from_user.id))
-			updateEntry(db_result, "members", members)
-			new_text = new_text + f"\n <b>{call.from_user.username}</b>"
-			updateEntry(db_result, "text", new_text)
+			if event.display_text:
+				event.display_text = event.display_text.replace(old_string, "")
+			
+			# Add user to event
+			db.add_event_member(event.id, user.id)
+			
+			# Update display text
+			new_text = db.update_event_display_text(event.id)
+			
+			# Clear user callout
+			user.callout_cleared = True
+			db.update_user(user)
 
 		else:
-			#this is the part where the user is initalised and added into db
-			members.append(str(call.from_user.id))
-			updateEntry(db_result, "members", members)
-			new_text = original_text + f"\n <b>{call.from_user.username}</b>"
-			updateEntry(db_result, "text", new_text)
-			ask_availability(call.from_user.id, event_id)
+			# User is initialized, add to event
+			db.add_event_member(event.id, user.id)
+			
+			# Update display text
+			new_text = db.update_event_display_text(event.id)
+			
+			# Ask for availability
+			ask_availability(call.from_user.id, event.event_id)
 			ic("Asking Availability...")
 
-
-	bot.edit_message_text(text = f"{new_text}",
+	# Update the inline message
+	bot.edit_message_text(text=f"{new_text}",
 							inline_message_id=message_id,
 							reply_markup=types.InlineKeyboardMarkup().add(
-								types.InlineKeyboardButton('Join event', callback_data=event_id),
-								types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + event_id))))
+								types.InlineKeyboardButton('Join event', callback_data=str(call.data).split()[1] if "Calculate" in str(call.data) else str(call.data)),
+								types.InlineKeyboardButton('Calculate Best Timing', callback_data=str("Calculate " + (str(call.data).split()[1] if "Calculate" in str(call.data) else str(call.data))))))
 
 def ask_availability(tele_id, event_id):
 	ic("here")
 	text = "Click the button below to set your availability!"
-	db_result = getEntry("Events", "event_id", str(event_id))
-	start_date = db_result.to_dict()["start_date"]
-	end_date = db_result.to_dict()["end_date"]
-	event_name = db_result.to_dict()["event_name"]
-
-	data = {"event_id": event_id,
-		 	"start" : start_date.strftime('%Y-%m-%d'),
-			"end" : end_date.strftime('%Y-%m-%d'),
-			"event_name": event_name
-		}
 	
+	# Get event using new Supabase system
+	event = db.get_event_by_event_id(str(event_id))
+	if not event:
+		ic(f"Event not found: {event_id}")
+		return
 
+	data = {
+		"event_id": event_id,
+		"start": event.start_date.strftime('%Y-%m-%d'),
+		"end": event.end_date.strftime('%Y-%m-%d'),
+		"event_name": event.event_name
+	}
+	
 	markup = types.ReplyKeyboardMarkup(row_width=1)
 	url = create_web_app_url("https://meetwhenah.deploy.jensenhshoots.com/dragselector/", data=data)
 	print(url)
@@ -343,21 +326,27 @@ def ask_availability(tele_id, event_id):
 
 
 ############################# WEBHOOK STUFF ###############################################
-bot.remove_webhook()
-@app.post(f'/{TOKEN}/')
-def process_webhook(update: dict):
-	"""
-	Process webhook calls
-	"""
-	if update:
-		update = telebot.types.Update.de_json(update)
-		bot.process_new_updates([update])
-	else:
-		return
+# bot.remove_webhook()
+# @app.post(f'/{TOKEN}/')
+# def process_webhook(update: dict):
+# 	"""
+# 	Process webhook calls
+# 	"""
+# 	if update:
+# 		update = telebot.types.Update.de_json(update)
+# 		bot.process_new_updates([update])
+# 	else:
+# 		return
 
-#Set webhook
-bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
-#				certificate=open(WEBHOOK_SSL_CERT, 'r'))
+# #Set webhook
+# bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+# #				certificate=open(WEBHOOK_SSL_CERT, 'r'))
+
+############################# POLLING SETUP ###############################################
+if __name__ == "__main__":
+	print("Starting bot with polling...")
+	bot.remove_webhook()
+	bot.infinity_polling(timeout=10, long_polling_timeout=5)
 
 ########################### LAMBDA STUFF #################################################
 #bot.remove_webhook()
